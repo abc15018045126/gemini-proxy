@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-function denoGeminiProxyMin() {
+function denogeminiproxymin() {
   // ...existing code...
   
 
@@ -32,16 +32,11 @@ function denoGeminiProxyMin() {
       return new Response(`代理请求失败: ${error.message}`, { status: 500 });
     }
   }
-  return handler;
-
-  
-
-
+  console.log(`Deno Gemini API 代理服务器正在运行。`);
+  serve(handler);
 }
 
-const handler = denoGeminiProxyMin(); 
-console.log(`Deno Gemini API 代理服务器正在运行。`);
-serve(handler);
+denogeminiproxymin();
 
 
 

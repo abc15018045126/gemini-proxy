@@ -1,9 +1,59 @@
-// deno_index.ts
-// 这是一个为 Deno Playground 设计的单一文件 Gemini API 代理，
-// 它只包含后端代理逻辑，并将 Gemini API 响应转换为 OpenAI 兼容格式。
+// deno.ts
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+/**
+ * @description 处理传入的请求。
+ * 这是一个异步函数，因为它可能会涉及到等待一些操作（尽管在这个简单的示例中没有）。
+ * @param request 传入的请求对象，类型为 Request。
+ */
+async function handleRequest(request: Request) {
+  // 检查请求是否来自 OpenAI。
+  if (isOpenAIRequest(request)) {
+    // 如果是 OpenAI 的请求，则执行 denogeminiproxybig 函数。
+    // 这个函数可能包含处理 OpenAI 请求的特定逻辑。
+    denogeminiproxybig();
+  } else {
+    // 如果不是 OpenAI 的请求（包括无法成功识别的请求），
+    // 则默认执行 denogeminiproxymin 函数。
+    // 这个函数可能包含处理其他类型请求或作为默认处理的逻辑。
+    denogeminiproxymin();
+  }
+}
+/**
+ * @description 辅助函数：判断一个请求是否源自 OpenAI。
+ * 该函数通过检查请求的 User-Agent 头部和请求路径来尝试识别 OpenAI 请求。
+ * @param request 传入的请求对象。
+ * @returns 如果请求被判断为来自 OpenAI，则返回 true；否则返回 false。
+ */
+function isOpenAIRequest(request: Request): boolean {
+  // 可以检查 User-Agent 头部、请求路径或特定的请求头部。
+  const userAgent = request.headers.get("User-Agent");
+  const path = new URL(request.url).pathname;
 
-// @deno-types="npm:@types/ws@latest" // For WebSocket types in Deno
+  // 常见的 OpenAI 请求标识。
+  // 1. 检查 User-Agent 是否包含 "OpenAI"。
+  if (userAgent && userAgent.includes("OpenAI")) {
+    return true;
+  }
+  // 2. 检查请求路径是否以 OpenAI API 的常见端点开头。
+  if (path.startsWith("/v1/chat/completions") || path.startsWith("/v1/engines/")) {
+    return true;
+  }
+  // 如果需要，可以根据 OpenAI API 的特性添加更多具体的判断逻辑，
+  // 例如检查特定的头部或请求体内容。
+  return false;
+}
 
+// 示例用法 (在实际的 Deno 应用程序中，这部分代码会出现在你的主文件或路由配置中)。
+// 如果你正在运行一个 Web 服务器，可以这样使用：
+// Deno.serve({ port: 8000 }, handleRequest);
+
+// 或者，你可以直接调用 handleRequest 函数进行测试：
+// handleRequest(new Request("http://localhost/test/openai/v1/chat/completions")); // 模拟 OpenAI 请求
+// handleRequest(new Request("http://localhost/test/something/else")); // 模拟其他请求
+/**
+ * @description 这是一个占位函数，用于处理 OpenAI 请求的复杂逻辑。
+ * 在实际应用中，这里可能会包含将请求代理到 OpenAI API 的代码。
+ */
 function denogeminiproxybig() {
   // --- 通用工具函数和错误处理 ---
 
@@ -790,5 +840,44 @@ function denogeminiproxybig() {
   Deno.serve(handleRequest);
 }
 
-// 调用主函数以启动服务器
-denogeminiproxybig();
+/**
+ * @description 这是一个占位函数，用于处理其他类型或无法识别的请求的逻辑。
+ * 在实际应用中，这里可能会包含相对简单的逻辑，或作为默认的请求处理。
+ */
+function denogeminiproxymin() {
+  // ...existing code...
+  
+
+  const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
+
+  async function handler(req: Request): Promise<Response> {
+    // ...existing code...
+    const url = new URL(req.url);
+    const targetUrl = new URL(url.pathname + url.search, GEMINI_API_BASE_URL);
+
+    console.log(`代理请求到: ${targetUrl.toString()}`);
+
+    try {
+      const response = await fetch(targetUrl, {
+        method: req.method,
+        headers: req.headers,
+        body: req.body,
+        duplex: 'half' as any,
+      });
+
+      console.log(`收到 Gemini API 响应，状态码: ${response.status}`);
+
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    } catch (error) {
+      console.error("代理请求失败:", error);
+      return new Response(`代理请求失败: ${error.message}`, { status: 500 });
+    }
+  }
+  console.log(`Deno Gemini API 代理服务器正在运行。`);
+  serve(handler);
+}
+

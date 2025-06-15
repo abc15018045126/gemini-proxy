@@ -1,10 +1,38 @@
-// deno_index.ts
-// 这是一个为 Deno Playground 设计的单一文件 Gemini API 代理，
-// 它只包含后端代理逻辑，并将 Gemini API 响应转换为 OpenAI 兼容格式。
+// deno.ts
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
-// @deno-types="npm:@types/ws@latest" // For WebSocket types in Deno
+/**
+ * @description 辅助函数：判断一个请求是否源自 OpenAI。
+ * 该函数通过检查请求的 User-Agent 头部和请求路径来尝试识别 OpenAI 请求。
+ * @param request 传入的请求对象。
+ * @returns 如果请求被判断为来自 OpenAI，则返回 true；否则返回 false。
+ */
+function isOpenAIRequest(request: Request): boolean {
+  // 可以检查 User-Agent 头部、请求路径或特定的请求头部。
+  const userAgent = request.headers.get("User-Agent");
+  const path = new URL(request.url).pathname;
 
-function denogeminiproxybig() {
+  // 常见的 OpenAI 请求标识。
+  // 1. 检查 User-Agent 是否包含 "OpenAI"。
+  if (userAgent && userAgent.includes("OpenAI")) {
+    return true;
+  }
+  // 2. 检查请求路径是否以 OpenAI API 的常见端点开头。
+  if (path.startsWith("/v1/chat/completions") || path.startsWith("/v1/engines/")) {
+    return true;
+  }
+  // 如果需要，可以根据 OpenAI API 的特性添加更多具体的判断逻辑，
+  // 例如检查特定的头部或请求体内容。
+  return false;
+}
+
+/**
+ * @description 这是一个占位函数，用于处理 OpenAI 请求的复杂逻辑。
+ * 在实际应用中，这里可能会包含将请求代理到 OpenAI API 的代码。
+ * * **重构说明：此函数现在接收一个 Request 对象并返回一个 Promise<Response>，
+ * 不再负责启动服务器。它包含了原 denogeminiproxybig 内部的 API 代理逻辑。**
+ */
+async function denogeminiproxybig(req: Request): Promise<Response> {
   // --- 通用工具函数和错误处理 ---
 
   /**
@@ -557,7 +585,7 @@ function denogeminiproxybig() {
           object: "embedding",
           index,
           embedding: values,
-          }))
+        }))
       }, null, "  ");
     }
     return new Response(body, fixCors(response));
@@ -733,62 +761,121 @@ function denogeminiproxybig() {
     return response;
   }
 
-  // === 主请求处理器 ===
+  // --- 主请求处理器 (原 denogeminiproxybig 内部的 handleRequest 逻辑) ---
+  const url = new URL(req.url);
+  console.log('Incoming Request URL (denogeminiproxybig):', req.url);
 
-  /**
-   * Main request handler for the Deno server.
-   * Routes incoming requests based on their type (WebSocket, API, Static File).
-   */
-  async function handleRequest(req: Request): Promise<Response> {
-    const url = new URL(req.url);
-    console.log('Incoming Request URL:', req.url);
+  // 获取 API Key (假设从 Authorization 头或 URL 参数中获取)
+  // 为了 Deno Playground 简单运行，这里直接从环境变量读取，
+  // 或者您可以在 Deno Playground 的 "Environment Variables" 设置 `GEMINI_API_KEY`
+  const apiKey = Deno.env.get("GEMINI_API_KEY") || req.headers.get("Authorization")?.split(" ")[1] || url.searchParams.get("key");
 
-    // 获取 API Key (假设从 Authorization 头或 URL 参数中获取)
-    // 为了 Deno Playground 简单运行，这里直接从环境变量读取，
-    // 或者您可以在 Deno Playground 的 "Environment Variables" 设置 `GEMINI_API_KEY`
-    const apiKey = Deno.env.get("GEMINI_API_KEY") || req.headers.get("Authorization")?.split(" ")[1] || url.searchParams.get("key");
-
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: "API Key is missing. Please provide it via Authorization header or 'key' URL parameter, or set GEMINI_API_KEY environment variable." }), {
-        status: 401,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        }
-      });
-    }
-
-    // 1. WebSocket 处理：检查 Upgrade 头
-    if (req.headers.get("Upgrade")?.toLowerCase() === "websocket") {
-      return handleWebSocket(req);
-    }
-
-    // 2. API 请求处理：检查路径是否匹配 Gemini API 路径
-    // Updated to include /v1/chat/completions
-    if (req.method === "OPTIONS") {
-        return handleOPTIONS();
-    } else if (url.pathname.endsWith("/v1/chat/completions") || url.pathname.endsWith("/chat/completions")) {
-      const reqBody = await req.json();
-      return handleCompletions(reqBody, apiKey);
-    } else if (url.pathname.endsWith("/embeddings")) {
-      const reqBody = await req.json();
-      return handleEmbeddings(reqBody, apiKey);
-    } else if (url.pathname.endsWith("/models")) {
-      return handleModels(apiKey);
-    }
-
-    // 如果以上都不匹配，返回 404
-    return new Response('Not Found', {
-      status: 404,
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: "API Key is missing. Please provide it via Authorization header or 'key' URL parameter, or set GEMINI_API_KEY environment variable." }), {
+      status: 401,
       headers: {
-        'content-type': 'text/plain;charset=UTF-8',
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
       }
     });
   }
 
-  // 启动 Deno 服务器
-  Deno.serve(handleRequest);
+  // 1. WebSocket 处理：检查 Upgrade 头
+  if (req.headers.get("Upgrade")?.toLowerCase() === "websocket") {
+    return handleWebSocket(req);
+  }
+
+  // 2. API 请求处理：检查路径是否匹配 Gemini API 路径
+  // Updated to include /v1/chat/completions
+  if (req.method === "OPTIONS") {
+      return handleOPTIONS();
+  } else if (url.pathname.endsWith("/v1/chat/completions") || url.pathname.endsWith("/chat/completions")) {
+    const reqBody = await req.json();
+    return handleCompletions(reqBody, apiKey);
+  } else if (url.pathname.endsWith("/embeddings")) {
+    const reqBody = await req.json();
+    return handleEmbeddings(reqBody, apiKey);
+  } else if (url.pathname.endsWith("/models")) {
+    return handleModels(apiKey);
+  }
+
+  // 如果以上都不匹配，返回 404
+  return new Response('Not Found', {
+    status: 404,
+    headers: {
+      'content-type': 'text/plain;charset=UTF-8',
+    }
+  });
 }
 
-// 调用主函数以启动服务器
-denogeminiproxybig();
+/**
+ * @description 这是一个占位函数，用于处理其他类型或无法识别的请求的逻辑。
+ * 在实际应用中，这里可能会包含相对简单的逻辑，或作为默认的请求处理。
+ * * **重构说明：此函数现在接收一个 Request 对象并返回一个 Promise<Response>，
+ * 不再负责启动服务器。它包含了原 denogeminiproxymin 内部的代理逻辑。**
+ */
+async function denogeminiproxymin(req: Request): Promise<Response> {
+  const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
+
+  // 原来的 handler 函数逻辑现在直接作为 denogeminiproxymin 的实现
+  const url = new URL(req.url);
+  const targetUrl = new URL(url.pathname + url.search, GEMINI_API_BASE_URL);
+
+  console.log(`代理请求到: ${targetUrl.toString()}`);
+
+  try {
+    const response = await fetch(targetUrl, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body,
+      duplex: 'half' as any,
+    });
+
+    console.log(`收到 Gemini API 响应，状态码: ${response.status}`);
+
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  } catch (error) {
+    console.error("代理请求失败:", error);
+    return new Response(`代理请求失败: ${error.message}`, { status: 500 });
+  }
+}
+
+/**
+ * @description 处理传入的请求。
+ * 这是一个异步函数，因为它可能会涉及到等待一些操作（尽管在这个简单的示例中没有）。
+ * @param request 传入的请求对象，类型为 Request。
+ * * **重构说明：此函数现在充当一个路由器，根据请求类型将请求分发给 denogeminiproxybig 或 denogeminiproxymin。
+ * 它不再在内部调用 Deno.serve()。**
+ */
+async function handleRequest(request: Request): Promise<Response> {
+  // 检查请求是否来自 OpenAI。
+  if (isOpenAIRequest(request)) {
+    console.log("主处理器：检测到 OpenAI 兼容请求，分发到 denogeminiproxybig。");
+    // 如果是 OpenAI 的请求，则执行 denogeminiproxybig 函数。
+    // 这个函数现在负责处理请求并返回响应。
+    return await denogeminiproxybig(request);
+  } else {
+    console.log("主处理器：检测到非 OpenAI 请求，分发到 denogeminiproxymin。");
+    // 如果不是 OpenAI 的请求（包括无法成功识别的请求），
+    // 则默认执行 denogeminiproxymin 函数。
+    // 这个函数现在负责处理请求并返回响应。
+    return await denogeminiproxymin(request);
+  }
+}
+
+// 示例用法 (在实际的 Deno 应用程序中，这部分代码会出现在你的主文件或路由配置中)。
+// 如果你正在运行一个 Web 服务器，可以这样使用：
+// Deno.serve({ port: 8000 }, handleRequest); // 这行是实际启动服务器的代码
+
+// 或者，你可以直接调用 handleRequest 函数进行测试：
+// handleRequest(new Request("http://localhost/test/openai/v1/chat/completions")); // 模拟 OpenAI 请求
+// handleRequest(new Request("http://localhost/test/something/else")); // 模拟其他请求
+
+
+// 启动 Deno 服务器 - 整个应用程序只在这里启动一次！
+console.log(`Deno API 代理服务器正在运行，监听传入请求...`);
+serve(handleRequest);
